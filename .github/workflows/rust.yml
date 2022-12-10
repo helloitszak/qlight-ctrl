@@ -20,6 +20,6 @@ jobs:
       with:
         toolchain: stable
     - name: Build
-      run: cargo build --verbose --frozen
+      run: cargo build --verbose --locked
     - name: Run tests
-      run: cargo test --verbose --frozen
+      run: cargo test --verbose --locked
