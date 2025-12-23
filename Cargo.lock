@@ -169,11 +169,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "qlight"
+name = "qlight-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "hidapi",
+ "qlight-core",
+]
+
+[[package]]
+name = "qlight-core"
+version = "0.0.1"
+dependencies = [
  "hidapi",
 ]
 

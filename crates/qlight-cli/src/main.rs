@@ -2,11 +2,9 @@ use std::{ffi::CString, io::Write};
 
 use clap::{ArgGroup, Parser};
 use hidapi::HidApi;
-use qlight::{Color, Light, LightCommand, LightMode, LightCommandSet};
+use qlight_core::{Color, Light, LightCommand, LightMode, LightCommandSet};
 
 use anyhow::{bail, Result};
-
-mod qlight;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -127,7 +125,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qlight::{Color, LightMode};
+    use qlight_core::{Color, LightMode};
 
     #[test]
     fn parse_command_ok_basic() {
