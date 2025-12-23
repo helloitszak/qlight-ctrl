@@ -39,8 +39,7 @@ impl TryFrom<&str> for Color {
             "white" => Color::White,
             other => {
                 return Err(ParseError(format!(
-                    "Expected one of [red, yellow, green, blue, white], got {}",
-                    other
+                    "Expected one of [red, yellow, green, blue, white], got {other}"
                 )))
             }
         };
@@ -67,8 +66,7 @@ impl TryFrom<&str> for LightMode {
             "blink" => LightMode::Blink,
             other => {
                 return Err(ParseError(format!(
-                    "Expected one of [on, off, blink] in command, got {}",
-                    other
+                    "Expected one of [on, off, blink] in command, got {other}"
                 )))
             }
         };
@@ -112,7 +110,7 @@ pub struct LightCommandSet {
 }
 
 impl LightCommandSet {
-    pub fn default_off() -> Self {
+    pub fn all_off() -> Self {
         Self {
             red: LightMode::Off,
             yellow: LightMode::Off,
