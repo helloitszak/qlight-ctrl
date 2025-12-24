@@ -144,6 +144,7 @@ impl LightCommandSet {
     }
 }
 
+#[derive(Debug)]
 pub struct Light {
     device: HidDevice,
 }

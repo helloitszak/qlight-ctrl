@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/qlight-core", "crates/qlight-cli"]
+members = ["crates/qlight-core", "crates/qlight-cli", "crates/qlight-osc"]
 resolver = "2"
 
 [workspace.package]
