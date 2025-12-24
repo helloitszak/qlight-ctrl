@@ -14,11 +14,10 @@ struct QlightOsc {
     router: Router<Command>,
 }
 
-// /lights/{name}/color 0
-
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Color,
+    Reset,
 }
 
 impl QlightOsc {
@@ -28,66 +27,92 @@ impl QlightOsc {
             .insert("/lights/{id}/{color}", Command::Color)
             .expect("Failed to compile route");
 
+        router
+            .insert("/reset/{id}", Command::Reset)
+            .expect("Failed to compile route");
+
         QlightOsc { light, router }
     }
 
     fn handle_packet(&mut self, packet: OscPacket) -> Result<()> {
         match packet {
             OscPacket::Message(msg) => {
-                let (_id, color) = match self.router.at(&msg.addr) {
-                    Ok(
-                        m @ Match {
-                            value: Command::Color,
-                            ..
-                        },
-                    ) => (
-                        m.params
+                match self.router.at(&msg.addr) {
+                    Ok(m @ Match {
+                        value: Command::Color,
+                        ..
+                    }) => {
+                        let id = m.params
                             .get("id")
-                            .expect("Color command should always have an id"),
-                        m.params
+                            .expect("Color command should always have an id");
+                        let color_str = m.params
                             .get("color")
-                            .expect("Color command should always have a color"),
-                    ),
+                            .expect("Color command should always have a color");
+                        if let Some(lcs) = self.handle_color_command(&msg, id, color_str) {
+                            self.light.update(&lcs)?;
+                        }
+                        Ok(())
+                    }
+                    Ok(m @ Match {
+                        value: Command::Reset,
+                        ..
+                    }) => {
+                        let id = m.params
+                            .get("id")
+                            .expect("Reset command should always have an id");
+                        if let Some(lcs) = self.handle_reset_command(&msg, id) {
+                            self.light.update(&lcs)?;
+                        }
+                        Ok(())
+                    }
                     _ => {
                         warn!("Ignoring message for unknown OSC path: {}", &msg.addr);
-                        return Ok(());
-                    },
-                };
-
-                let color = match color.to_lowercase().as_str() {
-                    "red" => Color::Red,
-                    "yellow" => Color::Yellow,
-                    "green" => Color::Green,
-                    "blue" => Color::Blue,
-                    "white" => Color::White,
-                    _ => {
-                        warn!("Ignoring message {} with unknown color {}", &msg.addr, color);
-                        return Ok(());
+                        Ok(())
                     }
-                };
-
-                let lightmode = match msg.args.as_slice() {
-                    [rosc::OscType::Int(0)] => LightMode::Off,
-                    [rosc::OscType::Int(1)] => LightMode::On,
-                    [rosc::OscType::Int(2)] => LightMode::Blink,
-                    _ => {
-                        warn!("Ignoring message {} with unknown arguments {:?}", &msg.addr, msg.args);
-                        return Ok(());
-                    }
-                };
-
-                let mut lcs: LightCommandSet = LightCommandSet::default();
-                info!("Setting light {:?} to {:?}", color, lightmode);
-                lcs.set(color, lightmode);
-
-                self.light.update(&lcs)?;
-                Ok(())
+                }
             }
             OscPacket::Bundle(_bundle) => {
                 warn!("We don't support OSC Bundles... yet. Ignoring packet.");
                 Ok(())
             }
         }
+    }
+
+    fn handle_color_command(&mut self, msg: &rosc::OscMessage, _id: &str, color_str: &str) -> Option<LightCommandSet> {
+
+        let color = match color_str.to_lowercase().as_str() {
+            "red" => Color::Red,
+            "yellow" => Color::Yellow,
+            "green" => Color::Green,
+            "blue" => Color::Blue,
+            "white" => Color::White,
+            _ => {
+                warn!("Ignoring message {} with unknown color {}", &msg.addr, color_str);
+                return None;
+            }
+        };
+
+        let lightmode = match msg.args.as_slice() {
+            [rosc::OscType::Int(0)] => LightMode::Off,
+            [rosc::OscType::Int(1)] => LightMode::On,
+            [rosc::OscType::Int(2)] => LightMode::Blink,
+            _ => {
+                warn!("Ignoring message {} with unknown arguments {:?}", &msg.addr, msg.args);
+                return None;
+            }
+        };
+
+        let mut lcs: LightCommandSet = LightCommandSet::default();
+        info!("Setting light {:?} to {:?}", color, lightmode);
+        lcs.set(color, lightmode);
+
+        Some(lcs)
+    }
+
+    fn handle_reset_command(&mut self, _msg: &rosc::OscMessage, _id: &str) -> Option<LightCommandSet> {
+        let lcs: LightCommandSet = LightCommandSet::all_off();
+        info!("Resetting light");
+        Some(lcs)
     }
 }
 
