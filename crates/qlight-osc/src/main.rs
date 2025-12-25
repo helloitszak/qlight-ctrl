@@ -1,16 +1,81 @@
 use anyhow::{Context, Result};
+use config::Config;
 use hidapi::HidApi;
 use matchit::{Match, Router};
 use qlight_core::{Color, Light, LightCommandSet, LightMode};
 use rosc::OscPacket;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::net::{SocketAddrV4, UdpSocket};
 use std::str::FromStr;
 use tracing::{info, trace, warn};
 
+const DEFAULT_CONFIG_PATH: &str = "config.toml";
+const CONFIG_ENV_VAR: &str = "QLIGHT_OSC_CONFIG";
+
 #[derive(Debug)]
+struct LightThing {
+    binding: DeviceBinding,
+    light: Option<Light>
+}
+
+impl LightThing {
+    fn new(binding: DeviceBinding) -> Self {
+        Self {
+            binding,
+            light: Default::default()
+        }
+    }
+
+    fn get_or_init_light(&mut self, hidapi: &HidApi) -> Result<&Light> {
+        if self.light.is_none() {
+            let path = &self.binding.path;
+
+            let device = hidapi
+                .open_path(&CString::from_str(path)?)
+                .with_context(|| format!("Failed to open HID device at path: {path}"))?;
+
+            self.light = Some(Light::new(device));
+        }
+
+        // At this point, we just put a light in if it doesn't exit.
+        Ok(self.light.as_ref().unwrap())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct DeviceBinding {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AppConfig {
+    listen: String,
+    bindings: Option<HashMap<String, DeviceBinding>>
+}
+
+impl AppConfig {
+    fn load_default() -> Result<Self> {
+        let config_path = std::env::var(CONFIG_ENV_VAR)
+            .unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
+        
+        let config = Config::builder()
+            .add_source(config::File::with_name(&config_path).required(true))
+            .build()
+            .with_context(|| format!("Failed to load config from {config_path}"))?;
+
+        config
+            .try_deserialize::<AppConfig>()
+            .with_context(|| "Failed to deserialize configuration")
+    }
+}
+
+// #[derive(Debug)]
 struct QlightOsc {
-    light: Light,
+    // light: Light,
+    hidapi: HidApi,
+    light: LightThing,
     router: Router<Command>,
 }
 
@@ -21,7 +86,7 @@ enum Command {
 }
 
 impl QlightOsc {
-    fn new(light: Light) -> Self {
+    fn new(hidapi: HidApi, binding: DeviceBinding) -> Self {
         let mut router = Router::new();
         router
             .insert("/lights/{id}/{color}", Command::Color)
@@ -31,7 +96,7 @@ impl QlightOsc {
             .insert("/reset/{id}", Command::Reset)
             .expect("Failed to compile route");
 
-        QlightOsc { light, router }
+        QlightOsc { light: LightThing::new(binding), router, hidapi }
     }
 
     fn handle_packet(&mut self, packet: OscPacket) -> Result<()> {
@@ -48,9 +113,15 @@ impl QlightOsc {
                         let color_str = m.params
                             .get("color")
                             .expect("Color command should always have a color");
+                
+
                         if let Some(lcs) = self.handle_color_command(&msg, id, color_str) {
-                            self.light.update(&lcs)?;
+                            match self.light.get_or_init_light(&self.hidapi) {
+                                Ok(light) => { light.update(&lcs)?; },
+                                Err(e) => warn!("Failed to update {:?}: {}", self.light, e)
+                            }
                         }
+
                         Ok(())
                     }
                     Ok(m @ Match {
@@ -61,7 +132,10 @@ impl QlightOsc {
                             .get("id")
                             .expect("Reset command should always have an id");
                         if let Some(lcs) = self.handle_reset_command(&msg, id) {
-                            self.light.update(&lcs)?;
+                            match self.light.get_or_init_light(&self.hidapi) {
+                                Ok(light) => { light.update(&lcs)?; },
+                                Err(e) => warn!("Failed to update {:?}: {}", self.light, e)
+                            }
                         }
                         Ok(())
                     }
@@ -119,19 +193,32 @@ impl QlightOsc {
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let addr = SocketAddrV4::from_str("127.0.0.1:8000")
-        .with_context(|| "Failed to parse IP".to_string())?;
-    let sock = UdpSocket::bind(addr).with_context(|| "Failed to bind to ip".to_string())?;
+    // Load configuration from file (default: config.toml, or QLIGHT_OSC_CONFIG env var)
+    let config = AppConfig::load_default()?;
+
+    let addr = SocketAddrV4::from_str(&config.listen)
+        .with_context(|| format!("Failed to parse listen address: {}", config.listen))?;
+
+    let sock = UdpSocket::bind(addr).with_context(|| format!("Failed to bind to {addr}"))?;
+
     info!("Listening to {addr}");
 
     let mut buf = [0u8; rosc::decoder::MTU];
 
-    let hidapi = HidApi::new().unwrap();
-    let device = hidapi
-        .open_path(&CString::from_str("DevSrvsID:4301069978")?)
-        .with_context(|| "Failed to open HID Device".to_string())?;
+    let hidapi = HidApi::new()?;
+    
+    // Get the first device binding from config, or use the first detected device
+    let device_path = if let Some(bindings) = &config.bindings {
+        bindings
+            .values()
+            .next()
+            .with_context(|| "No device bindings found in config")?
+    } else {
+        return Err(anyhow::anyhow!("No device bindings configured"));
+    };
 
-    let mut qlightosc = QlightOsc::new(Light::new(device));
+
+    let mut qlightosc = QlightOsc::new(hidapi, device_path.clone());
 
     loop {
         match sock.recv_from(&mut buf) {

@@ -1,0 +1,4 @@
+listen="0.0.0.0:8000"
+
+[bindings.device1]
+path="DevSrvsID:4301142453"
