@@ -1,0 +1,7 @@
+[package]
+name = "qlight-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hidapi = "2.6.4"
